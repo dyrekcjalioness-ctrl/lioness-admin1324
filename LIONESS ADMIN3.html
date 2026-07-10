@@ -1,0 +1,223 @@
+<!DOCTYPE html>
+<html lang="pl">
+<head>    
+    <meta charset="UTF-8">    
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">    
+    <title>LIONESS SYSTEM - ADMIN</title>    
+    <script src="https://www.gstatic.com/firebasejs/9.17.1/firebase-app-compat.js"></script>    
+    <script src="https://www.gstatic.com/firebasejs/9.17.1/firebase-database-compat.js"></script>    
+    <style>        
+        body{margin:0;background:#071529;color:#fff;font-family:Arial;padding:15px}        
+        .app{display:grid;grid-template-columns:1fr 420px;gap:20px;max-width:1300px;margin:auto}        
+        .panel{background:#0f2743;padding:15px;border-radius:12px;margin-bottom:10px}        
+        .grid{display:grid;grid-template-columns:repeat(7,1fr);gap:6px}        
+        .cell{padding:10px;background:#0b1e33;border-radius:6px;text-align:center;cursor:pointer}        
+        .selected{border:2px solid #f2c94c}        
+        .today{box-shadow:0 0 10px #f2c94c; border: 2px solid #f2c94c !important}        
+        .hour{display:flex;justify-content:space-between;padding:10px;background:#0b1e33;margin-bottom:5px;border-radius:6px;align-items:center}        
+        .hour.red{border:1px solid #e74c3c;background:#2c1a1a}        
+        button{padding:8px;border:none;border-radius:6px;cursor:pointer;font-weight:bold;width:100%;margin-top:5px}        
+        .blue{background:#163a63;color:#fff}.green{background:#2ecc71}.red{background:#e74c3c;color:#fff}        
+        input,select{width:100%;padding:10px;margin:5px 0;border-radius:6px;border:none;background:#132b4a;color:#fff;box-sizing:border-box}        
+        .calc{background:#10243f;padding:10px;border-radius:8px;margin-top:10px;font-size:14px}        
+        .live{display:flex;gap:10px;align-items:center;margin-bottom:10px}        
+        .lamp{width:12px;height:12px;border-radius:50%;background:#00ff88;box-shadow:0 0 10px #00ff88}        
+        .service-row{display:flex;gap:5px;align-items:center;margin-top:5px;font-size:13px}        
+        @media (max-width: 850px) { .app { grid-template-columns: 1fr; } body { padding: 5px; } .panel { padding: 10px; } }    
+    </style>
+</head>
+<body>
+<div class="app">    
+    <div>        
+        <div class="panel">            
+            <div class="live"><div class="lamp"></div><div><b>LIVE SYSTEM</b> | LIONESS Mobilna Wulkanizacja</div></div>            
+            <div style="display:flex;justify-content:space-between;align-items:center">                
+                <button style="width:auto" class="blue" onclick="prev()">‹</button>                
+                <h3 id="month" style="margin:0"></h3>                
+                <button style="width:auto" class="blue" onclick="next()">›</button>            
+            </div>            
+            <div class="grid" id="cal" style="margin-top:10px"></div>        
+        </div>        
+        <div class="panel">            
+            <h3>🆕 Nowi Partnerzy</h3><div id="pendingList"></div>            
+            <h3>✅ Zatwierdzeni</h3><div id="approvedList"></div>        
+        </div>        
+        <div class="panel">            
+            <h3>🧾 Usługi</h3>            
+            <input id="sName" placeholder="Nazwa usługi"><input id="sPrice" placeholder="Cena">            
+            <button id="addSBtn" class="green" onclick="addService()">Dodaj usługę</button>            
+            <div id="serviceList" style="margin-top:10px"></div>        
+        </div>        
+        <div class="panel">            
+            <h3>🏢 Firma</h3>            
+            <input id="firmAddr" placeholder="Adres firmy"><input id="freeKm" placeholder="Free km"><input id="priceKm" placeholder="Cena za km">            
+            <button class="blue" onclick="saveFirm()">Zapisz firmę</button>        
+        </div>    
+    </div>    
+    <div>        
+        <div class="panel">            
+            <h3 id="dateTitle">Wybierz dzień <span id="partnerLabel"></span></h3>            
+            <div id="hours"></div>            
+            <div id="form" style="display:none;margin-top:10px">                
+                <h3 id="time"></h3>                
+                <input id="name" placeholder="Imię" oninput="checkForm()">                
+                <input id="phone" placeholder="Telefon" oninput="checkForm()">                
+                <input id="addr" placeholder="Adres klienta" oninput="checkForm('calc')">                
+                <input id="regNum" placeholder="Numer rejestracyjny" oninput="checkForm()">                
+                <select id="servicePick" onchange="checkForm('calc')"></select>                
+                <div class="calc" id="calcBox">Wynik kalkulacji...</div>                
+                <button id="saveBtn" class="green" onclick="save()" disabled>POTWIERDZAM REZERWACJĘ</button>                
+                <button class="red" onclick="deleteBooking()" id="delBtn" style="display:none;">USUŃ</button>                
+                <button class="blue" onclick="closeF()">Anuluj</button>            
+            </div>        
+        </div>    
+    </div>
+</div>
+<script>    
+    firebase.initializeApp({apiKey:"AIzaSyAG1ukkWJC_05JCeZp41EhyoVJ2Cl58",databaseURL:"https://kalendar-f5dd9-default-rtdb.firebaseio.com"});    
+    const db=firebase.database();    
+    let d=new Date(), sel=null, hour=null, editServiceId=null, services={}, bookings={}, firm={address:"Rzeczna 4/15 Poznań 61-013",freeKm:5,priceKm:10};    
+    let filterP = "ALL";    
+    const HOURS=["07:00","09:00","11:00","13:00","15:00","17:00","19:00","21:00"];
+    
+    db.ref("services").on("value",s=>{services=s.val()||{};renderServices();});    
+    db.ref("bookings").on("value",s=>{bookings=s.val()||{};render();if(sel)renderHours();renderList();});    
+    db.ref("settings").on("value",s=>{if(s.val()){firm=s.val();document.getElementById("firmAddr").value=firm.address||"";document.getElementById("freeKm").value=firm.freeKm||"";document.getElementById("priceKm").value=firm.priceKm||"";}});
+    
+    async function geocode(a){try{const r=await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(a)}`);const d=await r.json();return d[0]?{lat:+d[0].lat,lon:+d[0].lon}:null;}catch(e){return null;}}    
+    async function getKm(a,b){const x=await geocode(a);const y=await geocode(b);if(!x||!y)return 0;const r=await fetch(`https://router.project-osrm.org/route/v1/driving/${x.lon},${x.lat};${y.lon},${y.lat}?overview=false`);const j=await r.json();return (j.routes?.[0]?.distance||0)/1000;}
+    
+    function checkForm(runCalc){let valid=document.getElementById("name").value&&document.getElementById("phone").value&&document.getElementById("addr").value&&document.getElementById("regNum").value&&document.getElementById("servicePick").value;document.getElementById("saveBtn").disabled=!valid;if(runCalc)calc();}        
+    async function calc(){        
+        let id=document.getElementById("servicePick").value;        
+        let s=services[id]; if(!s)return;        
+        let addr=document.getElementById("addr").value;        
+        let calcBox=document.getElementById("calcBox");        
+        if(addr.length<5){calcBox.innerHTML="Wpisz adres..."; return;}        
+        calcBox.innerHTML="Liczenie trasy...";        
+        let km=await getKm(firm.address||"Rzeczna 4/15 Poznań", addr);        
+        let extra=km > firm.freeKm ? (km-firm.freeKm)*firm.priceKm : 0;        
+        let total = parseFloat(s.price) + extra;        
+        calcBox.innerHTML=`<b>${s.name}</b><br>Cena: ${s.price} zł<br>Dojazd: ${km.toFixed(1)} km<br>Extra: ${extra.toFixed(2)} zł<br><b>RAZEM: ${total.toFixed(2)} zł</b>`;    
+    }
+    
+    db.ref("pending_partners").on("value", s=>{        
+        let l=document.getElementById("pendingList"); l.innerHTML="";        
+        Object.entries(s.val()||{}).forEach(([k,v])=>l.innerHTML+=`<div class="service-row">${v.name} <button class="green" style="width:auto" onclick="approve('${k}')">Zatwierdź</button></div>`);    
+    });
+    
+    function renderList() {
+        let l=document.getElementById("approvedList"); 
+        l.innerHTML=`<button class="blue" onclick="filterP='ALL'; renderHours()">Wszyscy</button>`;
+        let mStr = `${d.getFullYear()}-${d.getMonth()+1}`;
+        db.ref("approved_partners").once("value", s => {
+            Object.entries(s.val()||{}).forEach(([k,v]) => {
+                let count = 0;
+                Object.entries(bookings).forEach(([date, hours]) => {
+                    if(date.startsWith(mStr)) Object.values(hours).forEach(b => { if(b.partnerId === k) count++; });
+                });
+                l.innerHTML += `
+                    <div class="panel" style="margin-top:10px; font-size: 12px; background: #132b4a">
+                        <button class="red" style="width:auto; padding: 2px 8px" onclick="deletePartner('${k}')">X</button>
+                        <b>${v.name}</b><br>💳 Konto: ${v.bankAccount || "Brak"}<br>
+                        📈 Klientów: ${count} | 💰 Do wypłaty: <b>${count * 50} zł</b>
+                        <button class="blue" style="margin-top:5px" onclick="filterP='${k}'; renderHours()">Kalendarz</button>
+                        <button class="green" style="margin-top:5px" onclick="printReport('${k}', '${v.name}')">Drukuj Raport</button>
+                    </div>`;
+            });
+        });
+    }
+
+    function printReport(pID, pName) {
+        let mStr = `${d.getFullYear()}-${d.getMonth()+1}`;
+        let win = window.open('', '_blank');
+        let html = `<html><body><h2>Raport partnera: ${pName}</h2><h3>Miesiąc: ${mStr}</h3><table border="1" width="100%"><tr><th>Data</th><th>Godzina</th><th>Klient</th><th>Auto</th></tr>`;
+        let c = 0;
+        Object.entries(bookings).forEach(([date, hours]) => {
+            if(date.startsWith(mStr)) {
+                Object.entries(hours).forEach(([time, b]) => {
+                    if(b.partnerId === pID) {
+                        html += `<tr><td>${date}</td><td>${time}</td><td>${b.name}</td><td>${b.reg}</td></tr>`;
+                        c++;
+                    }
+                });
+            }
+        });
+        html += `</table><p>Łącznie aut: ${c} | Do wypłaty: ${c * 50} zł</p><button onclick="window.print()">Drukuj</button></body></html>`;
+        win.document.write(html);
+    }
+
+    function approve(k) { db.ref("pending_partners/"+k).once('value', s => { db.ref("approved_partners/"+k).set(s.val()); db.ref("pending_partners/"+k).remove(); }); }    
+    function deletePartner(k) { if(confirm("Czy na pewno usunąć?")) db.ref("approved_partners/"+k).remove(); }
+    
+    function render(){        
+        let c=document.getElementById("cal"); c.innerHTML=""; let y=d.getFullYear(), m=d.getMonth();        
+        let now=new Date(); let todayStr=`${now.getFullYear()}-${now.getMonth()+1}-${now.getDate()}`;        
+        document.getElementById("month").innerText=d.toLocaleString("pl-PL",{month:"long",year:"numeric"});        
+        for(let i=1;i<=new Date(y,m+1,0).getDate();i++){            
+            let key=`${y}-${m+1}-${i}`, count=bookings[key]?Object.keys(bookings[key]).length:0;            
+            let div=document.createElement("div"); div.className="cell"+(sel===key?" selected":"")+(key===todayStr?" today":"");            
+            div.innerHTML=`${i}<br><small>${HOURS.length-count} wolnych</small>`;            
+            div.onclick=()=>{sel=key;render();renderHours();};c.appendChild(div);        
+        }    
+    }
+    
+    function renderHours(){        
+        document.getElementById("partnerLabel").innerText = filterP === "ALL" ? "" : " (Partner: " + filterP + ")";        
+        let h=document.getElementById("hours"); h.innerHTML=""; let day=bookings[sel]||{};        
+        HOURS.forEach(t=>{            
+            let r=day[t];            
+            if(filterP !== "ALL" && r?.partnerId !== filterP) return;            
+            let div=document.createElement("div"); div.className="hour"+(r?" red":"");            
+            div.innerHTML=`<div style="font-size: 13px;"><b>${t}</b> ${r?`<br>👤 ${r.name}<br>📞 ${r.phone}<br>🚗 ${r.reg}<br>📍 ${r.addr}<br>🛠 ${r.note}<br>💰 <b>${r.totalPrice||''} zł</b>`:"WOLNE"}</div>            
+            <button class="blue" style="width:auto" onclick="openForm('${t}')">${r?"Edytuj":"Zarezerwuj"}</button>`;            
+            h.appendChild(div);        
+        });    
+    }
+    
+    function renderServices(){        
+        let s=document.getElementById("servicePick"); let list=document.getElementById("serviceList");        
+        s.innerHTML='<option value="">Wybierz usługę</option>'; list.innerHTML="";        
+        Object.keys(services).forEach(k=>{            
+            s.innerHTML+=`<option value="${k}">${services[k].name} - ${services[k].price} zł</option>`;            
+            list.innerHTML+=`<div class="service-row"><span style="flex-grow:1">${services[k].name} (${services[k].price} zł)</span><button class="blue" style="width:auto;margin:0" onclick="editService('${k}')">E</button><button class="red" style="width:auto;margin:0" onclick="deleteService('${k}')">X</button></div>`;        
+        });    
+    }
+    
+    function addService(){let n=document.getElementById("sName").value; let p=document.getElementById("sPrice").value; if(!n||!p) return; if(editServiceId) { db.ref("services/"+editServiceId).update({name:n, price:p}); editServiceId=null; document.getElementById("addSBtn").innerText="Dodaj usługę"; } else { db.ref("services").push({name:n, price:p}); } document.getElementById("sName").value=""; document.getElementById("sPrice").value=""; }    
+    function editService(id){editServiceId=id; document.getElementById("sName").value=services[id].name; document.getElementById("sPrice").value=services[id].price; document.getElementById("addSBtn").innerText="Zapisz zmiany";}    
+    function deleteService(id){if(confirm("Czy na pewno usunąć?")) db.ref("services/"+id).remove();}        
+    
+    function openForm(t){         
+        hour=t; document.getElementById("form").style.display="block"; document.getElementById("time").innerText=t;        
+        let r=bookings[sel]?.[t];        
+        if(r){ document.getElementById("name").value=r.name; document.getElementById("phone").value=r.phone; document.getElementById("addr").value=r.addr; document.getElementById("regNum").value=r.reg; document.getElementById("servicePick").value=r.serviceId; document.getElementById("delBtn").style.display="inline-block"; calc(); }        
+        else { document.getElementById("name").value=""; document.getElementById("phone").value=""; document.getElementById("addr").value=""; document.getElementById("regNum").value=""; document.getElementById("servicePick").value=""; document.getElementById("delBtn").style.display="none"; document.getElementById("calcBox").innerHTML="Wynik kalkulacji..."; }        
+        checkForm(true);     
+    }        
+    
+    function save(){        
+        let total = document.getElementById("calcBox").innerText.match(/RAZEM: ([\d\.]+)/)?.[1] || 0;        
+        db.ref(`bookings/${sel}/${hour}`).set({            
+            name:document.getElementById("name").value, phone:document.getElementById("phone").value,             
+            addr:document.getElementById("addr").value, reg:document.getElementById("regNum").value,             
+            note:services[document.getElementById("servicePick").value].name,            
+            serviceId: document.getElementById("servicePick").value,            
+            totalPrice: total,            
+            partnerId: filterP === "ALL" ? "ADMIN" : filterP        
+        });        
+        closeF();    
+    }        
+    
+    function deleteBooking(){db.ref(`bookings/${sel}/${hour}`).remove();closeF();}    
+    function closeF(){document.getElementById("form").style.display="none";}    
+    function saveFirm(){        
+        let newFirm = {address: document.getElementById("firmAddr").value, freeKm: parseFloat(document.getElementById("freeKm").value), priceKm: parseFloat(document.getElementById("priceKm").value)};        
+        db.ref("settings").set(newFirm).then(() => { firm = newFirm; alert("Zapisano ustawienia firmy!"); });    
+    }    
+    function prev(){d.setMonth(d.getMonth()-1);render();renderList();}    
+    function next(){d.setMonth(d.getMonth()+1);render();renderList();}    
+    render();
+</script>
+</body>
+</html>
